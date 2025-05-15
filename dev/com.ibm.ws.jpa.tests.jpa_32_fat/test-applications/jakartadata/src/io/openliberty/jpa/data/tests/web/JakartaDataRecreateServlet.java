@@ -39,6 +39,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 import org.junit.Ignore;
 import org.junit.Test;
@@ -74,7 +75,9 @@ import io.openliberty.jpa.data.tests.models.Rebate.Status;
 import io.openliberty.jpa.data.tests.models.Reciept;
 import io.openliberty.jpa.data.tests.models.RomanNumeral;
 import io.openliberty.jpa.data.tests.models.Segment;
+import io.openliberty.jpa.data.tests.models.ShippingAddress;
 import io.openliberty.jpa.data.tests.models.Store;
+import io.openliberty.jpa.data.tests.models.StreetAddress;
 import io.openliberty.jpa.data.tests.models.Triangle;
 import io.openliberty.jpa.data.tests.models.Vehicle;
 import jakarta.annotation.Resource;
@@ -2128,6 +2131,104 @@ public class JakartaDataRecreateServlet extends FATServlet {
         // EclipseLink should handle this case by adding in additional escapes to the bound parameters where PostgreSQL uses the default escape character `\`
         assertEquals(27.97f, totals.get(0), 0.01);
 
+    }
+    
+    @Test
+    public void testOLGH31559() throws Exception {
+        // Clean up before the test (delete all existing ShippingAddress entities)
+        deleteAllEntities(ShippingAddress.class);
+
+        // Create new ShippingAddress entities
+        ShippingAddress a1 = new ShippingAddress();
+        a1.id = 1001L;
+        a1.city = "Rochester";
+        a1.state = "Minnesota";
+        a1.streetAddress = new StreetAddress(2800, "37th St NW");
+        a1.zipCode = 55901;
+        a1.streetAddress.recipientInfo.addAll(List.of("Receiving Dock", "Building 040-1"));
+
+        ShippingAddress a2 = new ShippingAddress();
+        a2.id = 1002L;
+        a2.city = "Rochester";
+        a2.state = "Minnesota";
+        a2.streetAddress = new StreetAddress(201, "4th St SE");
+        a2.zipCode = 55904;
+
+        ShippingAddress a3 = new ShippingAddress();
+        a3.id = 1003L;
+        a3.city = "Rochester";
+        a3.state = "Minnesota";
+        a3.streetAddress = new StreetAddress(200, "1st Ave SW");
+        a3.zipCode = 55902;
+
+        ShippingAddress a4 = new ShippingAddress();
+        a4.id = 1004L;
+        a4.city = "Rochester";
+        a4.state = "Minnesota";
+        a4.streetAddress = new StreetAddress(151, "4th St SE");
+        a4.zipCode = 55904;
+
+        // Persist entities
+        tx.begin();
+        em.persist(a1);
+        em.persist(a2);
+        em.persist(a3);
+        em.persist(a4);
+        tx.commit();
+
+        // Example 1: Query StreetAddress by houseNumber range
+        tx.begin();
+        try {
+            List<StreetAddress> streetResults = em.createQuery(
+                "SELECT o.streetAddress FROM ShippingAddress o WHERE o.streetAddress.houseNumber BETWEEN :start AND :end ORDER BY o.streetAddress.streetName, o.streetAddress.houseNumber",
+                StreetAddress.class)
+                .setParameter("start", 150)
+                .setParameter("end", 250)
+                .getResultList();
+
+            System.out.println("Addresses with houseNumber BETWEEN 150 AND 250:");
+            for (StreetAddress sa : streetResults) {
+                System.out.println("Street: " + sa.streetName + ", House Number: " + sa.houseNumber);
+            }
+            tx.commit();
+        } catch (Exception e) {
+            tx.rollback();
+            fail("Unexpected exception during StreetAddress query: " + e.getMessage());
+        }
+
+        // Example 2: Query recipientInfo via native SQL
+        tx.begin();
+        try {
+            Query nativeQuery = em.createNativeQuery(
+                "SELECT RECIPIENTINFO FROM ShippingAddress_RECIPIENTINFO WHERE ShippingAddress_ID = :id");
+            nativeQuery.setParameter("id", 1001L);
+            List<String> recipientInfos = nativeQuery.getResultList();
+
+            System.out.println("Recipient info for address 1001:");
+            for (String info : recipientInfos) {
+                System.out.println(info);
+            }
+            tx.commit();
+        } catch (Exception e) {
+            tx.rollback();
+            fail("Unexpected exception during native query: " + e.getMessage());
+        }
+
+        // **Optional: Test incorrect parameter name usage (simulate your original error)**
+        tx.begin();
+        try {
+            // This will fail because 'ID' is not a parameter name
+            List<String> brokenQueryResult = em.createQuery(
+                    "SELECT s FROM ShippingAddress s WHERE s.id = :ID", String.class)
+                    .setParameter("ID", 1001L)
+                    .getResultList();
+            tx.commit();
+            fail("Expected an exception due to incorrect parameter name, but none was thrown.");
+        } catch (Exception e) {
+            tx.rollback();
+            System.out.println("Caught expected error: " + e.getMessage());
+            assertTrue(e.getMessage().contains("parameter") || e.getMessage().contains("parameter name"));
+        }
     }
 
     /**
