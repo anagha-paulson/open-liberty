@@ -14,11 +14,20 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import java.util.Collections;
 import java.util.List;
+import java.util.function.Consumer;
+import java.util.function.Function;
 
 import org.junit.Test;
+
+import com.ibm.websphere.csi.J2EEName;
+import com.ibm.ws.jpa.JPAPuId;
+import com.ibm.ws.jpa.management.JPAEMFactory;
 
 import componenttest.app.FATServlet;
 import io.openliberty.jpa.persistence.tests.models.AsciiCharacter;
@@ -43,6 +52,24 @@ public class JakartaPersistenceServlet extends FATServlet {
 
     @Resource
     private UserTransaction tx;
+
+    private JPAEMFactory mockDelegateFactory;
+    private JPAEMFactoryV32 factoryUnderTest;
+    private JPAPuId mockPuId;
+    private J2EEName mockJ2eeName;
+
+    @Before
+    public void setUp() {
+        mockPuId = mock(JPAPuId.class, "mockPuId");
+        mockJ2eeName = mock(J2EEName.class, "mockJ2eeName");
+        mockDelegateFactory = mock(JPAEMFactory.class, "mockDelegateFactory");
+
+        factoryUnderTest = new JPAEMFactoryV32(mockPuId, mockJ2eeName, null) {
+            {
+                this.ivFactory = mockDelegateFactory;
+            }
+        };
+    }
 
     @Test
     public void testSetOperationsJPQL() {
@@ -247,6 +274,28 @@ public class JakartaPersistenceServlet extends FATServlet {
                         .getResultList();
         assertTrue("Expected hex value 41 not found", results.contains("41")); // 65 in hex
         assertTrue("Expected hex value 42 not found", results.contains("42")); // 66 in hex
+    }
+
+    @Test
+    void testRunInTransactionDelegatesToIvFactory() {
+        Consumer<EntityManager> work = em -> {
+        };
+
+        factoryUnderTest.runInTransaction(work);
+
+        verify(mockDelegateFactory, times(1)).runInTransaction(work);
+    }
+
+    @Test
+    void testCallInTransactionDelegatesToIvFactory() {
+        Function<EntityManager, String> work = em -> "result";
+
+        when(mockDelegateFactory.callInTransaction(any())).thenReturn("result");
+
+        String result = factoryUnderTest.callInTransaction(work);
+
+        verify(mockDelegateFactory, times(1)).callInTransaction(work);
+        assert result.equals("result");
     }
 
 }
