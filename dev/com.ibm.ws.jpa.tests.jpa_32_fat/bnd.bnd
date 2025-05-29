@@ -45,4 +45,7 @@ javac.target: 17
     io.openliberty.jakarta.validation.3.1;version=latest,\
     io.openliberty.org.testcontainers;version=latest,\
     org.jboss.shrinkwrap:shrinkwrap-impl-base;version=1.2.3,\
-    org.jboss.shrinkwrap:shrinkwrap-spi;version=1.2.3
+    org.jboss.shrinkwrap:shrinkwrap-spi;version=1.2.3,\
+    com.ibm.ws.jpa.container.core;version=latest,\
+    com.ibm.ws.jpa.container.v32;version=latest,\
+    com.ibm.ws.container.service.compat;version=latest
