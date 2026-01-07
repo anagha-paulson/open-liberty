@@ -71,6 +71,20 @@ public class LibertyJaxRsClientSSLOutInterceptor extends AbstractPhaseIntercepto
             return; // SSL config already provided
         }
 
+        //Store URI first to avoid race condition with concurrent requests
+        String uriString = (String) message.get(Message.REQUEST_URI);
+        URI uri = URI.create(uriString);
+        String host = uri.getHost();
+        int port = uri.getPort();
+        
+        // if port is not specified, use default SSL port (443)
+        if (port == -1 && !uriString.contains(":-1")) {
+            if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+                Tr.debug(tc, "port was not specified, using the default SSL port (443)");
+            }
+            port = 443;
+        }
+
         //see if SSL Ref id is used
         Object sslRefObj = message.get(JAXRSClientConstants.SSL_REFKEY);
         String sslRef = null;
@@ -83,7 +97,7 @@ public class LibertyJaxRsClientSSLOutInterceptor extends AbstractPhaseIntercepto
         // getSocketFactory will return null if either the ssl feature is not enabled
         // or if it is enabled but there is no SSL configuration defined.  A null here
         // means to use the JDK's SSL implementation.
-        SSLSocketFactory socketFactory = getSSLSocketFactory(sslRef, message);
+        SSLSocketFactory socketFactory = getSSLSocketFactory(sslRef, host, Integer.toString(port));
         if (socketFactory != null) {
             Object disableCNCheckObj = message.get(JAXRSClientConstants.DISABLE_CN_CHECK);
             Conduit cd = message.getExchange().getConduit(message);
@@ -151,22 +165,7 @@ public class LibertyJaxRsClientSSLOutInterceptor extends AbstractPhaseIntercepto
         return jaxrsSslMgrClass;
     }
 
-    private Object[] getJaxRsSSLManagerParams(String sslRef, Message message) {
-        String uriString = (String) message.get(Message.REQUEST_URI);
-        URI uri = URI.create(uriString);
-        int port = uri.getPort();
-
-        // if the port wasn't specified, use the default SSL port (443)
-        if (port == -1 && !uriString.contains(":-1")) {
-            Tr.debug(tc, "port was not specified, using the default SSL port (443)");
-            port = 443;
-        }
-
-        Object[] parameters = { sslRef, uri.getHost(), Integer.toString(port) };
-        return parameters;
-    }
-
-    private SSLSocketFactory getSSLSocketFactory(String sslRef, Message message) {
+    private SSLSocketFactory getSSLSocketFactory(String sslRef, String host, String port) {
         try {
             final Class<?> jaxrsSslMgrClass = getJaxRsSSLManagerClass();
             Object classObject = jaxrsSslMgrClass.newInstance();
@@ -178,7 +177,18 @@ public class LibertyJaxRsClientSSLOutInterceptor extends AbstractPhaseIntercepto
                 }
             });
 
-            SSLSocketFactory ssLSocketFactory = (SSLSocketFactory) m.invoke(classObject, getJaxRsSSLManagerParams(sslRef, message));
+            if (!StringUtils.isEmpty(sslRef)) {
+                if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+                    Tr.debug(tc, "Use the sslRef = " + sslRef + " to create the SSLSocketFactory for host=" + host + ", port=" + port);
+                }
+            } else {
+                if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+                    Tr.debug(tc, "Get Liberty default SSLSocketFactory for host=" + host + ", port=" + port);
+                }
+            }
+
+            Object[] parameters = { sslRef, host, port };
+            SSLSocketFactory ssLSocketFactory = (SSLSocketFactory) m.invoke(classObject, parameters);
             return ssLSocketFactory;
         } catch (Exception e) {
             if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
